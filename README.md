@@ -46,4 +46,5 @@ Open the **Instructions** tab inside the app for a complete step-by-step guide.
 
 ## Author
 
-Zirou Xie — University of Michigan
+Lauren Abbruzzese, Likhitha Sree Galam, Meghana Kasturi, Caymen Novak, Jesus Pereira Pires, Rafael Ruiz, Rebecca Schmidt, Zirou Xie
+University of Michigan-Dearborn
