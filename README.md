@@ -46,4 +46,4 @@ Open the **Instructions** tab inside the app for a complete step-by-step guide.
 
 ## Author
 
-Zirou [last name] — University of Michigan
+Zirou Xie — University of Michigan
