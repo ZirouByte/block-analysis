@@ -36,6 +36,7 @@ function app = BlockAnalysisApp
     S.hydrogel.thickness = 5.38;
     S.hydrogel.length    = 7.304;
     S.image_paths        = {};     % uploaded image paths
+    S.calImagePath       = '';     % direct path to the Step 2 calibration image
     S.refImagePath       = '';     % reference image for ROI selection
     S.dicDir             = '';     % folder of "after" images for DIC
     S.dicSeriesPaths     = {};     % uploaded after-series files
@@ -305,6 +306,7 @@ function app = BlockAnalysisApp
         S2.hydrogel.thickness  = 5.38;
         S2.hydrogel.length     = 7.304;
         S2.image_paths         = {};
+        S2.calImagePath        = '';
         S2.refImagePath        = '';
         S2.refImageData        = [];
         S2.dicDir              = '';
@@ -943,21 +945,23 @@ function app = BlockAnalysisApp
             'FontSize', 14, 'FontWeight','bold', 'FontColor', CLR.text);
         uTitle.Layout.Row = 1; uTitle.Layout.Column = [1 3];
 
-        lDir = uilabel(ug, 'Text','Image', 'FontWeight','bold', ...
+        lDir = uilabel(ug, 'Text','Image path', 'FontWeight','bold', ...
             'FontColor', CLR.text2, 'FontSize', 13);
         lDir.Layout.Row = 2; lDir.Layout.Column = 1;
         H.imgDirField = uieditfield(ug, 'text', ...
-            'Placeholder','No image chosen yet — use Upload');
+            'Placeholder','Full path to a .jpg or .png — use Upload or type it here');
         H.imgDirField.Layout.Row = 2; H.imgDirField.Layout.Column = 2;
-        H.imgDirField.Editable = 'off';
+        H.imgDirField.Editable = 'on';
+        H.imgDirField.ValueChangedFcn = @(d,~) loadTypedImagePath(d.Value);
 
         btnUpload = uibutton(ug, 'Text','Upload image...', 'FontSize', 13);
         btnUpload.Layout.Row = 2; btnUpload.Layout.Column = 3;
         btnUpload.ButtonPushedFcn = @(~,~) uploadImages();
 
         uHint = uilabel(ug, 'WordWrap','on', 'FontSize', 12, 'FontColor', CLR.text3, ...
-            'Text', ['Tip: this should be a single image clearly showing both ' ...
-            'reference blocks side by side.']);
+            'Text', ['Either click Upload to browse, or paste a full file path ' ...
+            '(e.g. C:\Users\you\Pictures\0002.jpg) and press Enter. The image should ' ...
+            'clearly show both reference blocks side by side.']);
         uHint.Layout.Row = 3; uHint.Layout.Column = [1 3];
 
         % ---- Step 2: dimensions table card ----
@@ -1058,24 +1062,55 @@ function app = BlockAnalysisApp
 
     function uploadImages()
         try
-            [files, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff'}, ...
-                'Select image(s)', 'MultiSelect','on');
+            [files, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff', ...
+                'Image files (*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff)'; ...
+                '*.*', 'All files (*.*)'}, ...
+                'Select calibration image', 'MultiSelect','on');
             if isequal(files, 0), return; end
             if ischar(files), files = {files}; end
             S = fig.UserData;
             S.image_paths = cellfun(@(f) fullfile(path, f), files, 'uni', false);
             S.imgDir = path;
+            % Store the FULL path to the first uploaded image so the
+            % calibration routine knows exactly which file to open. This
+            % avoids the old behavior where it searched the folder for a
+            % hardcoded filename like 0002.jpg.
+            S.calImagePath = S.image_paths{1};
             fig.UserData = S;
-            handles.step2.imgDirField.Value = path;
-            handles.step2.statusLbl.Text = sprintf('Uploaded %d image(s)', numel(files));
+            handles.step2.imgDirField.Value = S.calImagePath;
+            handles.step2.statusLbl.Text = sprintf( ...
+                'Loaded "%s". Click "Click corners" to continue.', files{1});
+            handles.step2.statusLbl.FontColor = CLR.text2;
         catch ME
             uialert(fig, sprintf('Upload failed: %s', ME.message), 'Error');
         end
     end
 
+    function loadTypedImagePath(p)
+        % Handle a user typing a path directly into the field.
+        if isempty(p), return; end
+        if ~isfile(p)
+            uialert(fig, sprintf( ...
+                ['The path you entered doesn''t point to an existing file:\n\n' ...
+                '%s\n\nDouble-check the path and try again.'], p), 'File not found');
+            return;
+        end
+        S = fig.UserData;
+        S.calImagePath = p;
+        [folder, ~, ~] = fileparts(p);
+        S.imgDir = [folder filesep];
+        S.image_paths = {p};
+        fig.UserData = S;
+        [~, name, ext] = fileparts(p);
+        handles.step2.statusLbl.Text = sprintf( ...
+            'Loaded "%s%s". Click "Click corners" to continue.', name, ext);
+        handles.step2.statusLbl.FontColor = CLR.text2;
+    end
+
     function runCornerTrials()
         S = fig.UserData;
-        if isempty(S.imgDir) && isempty(S.image_paths)
+        if isempty(S.imgDir) && isempty(S.image_paths) && ...
+                (~isfield(S,'calImagePath') || isempty(S.calImagePath))
             uialert(fig, 'Specify an image folder or upload an image first.', 'Missing image'); return;
         end
         % Read the user-edited dimensions table and validate
@@ -1088,8 +1123,13 @@ function app = BlockAnalysisApp
             return;
         end
         try
-            % Call the click-collection function with the user's mm values
-            S.dist2px_data = load_px2dist_data_app(S.imgDir, fig, dimsTable);
+            % Prefer the direct image path if we have one; fall back to folder
+            if isfield(S, 'calImagePath') && ~isempty(S.calImagePath) && isfile(S.calImagePath)
+                imgArg = S.calImagePath;
+            else
+                imgArg = S.imgDir;
+            end
+            S.dist2px_data = load_px2dist_data_app(imgArg, fig, dimsTable);
             fig.UserData = S;
             handles.step2.statusLbl.Text = ...
                 sprintf('Captured %d sides × 4 trials. Starting px→mm calibration...', 8);
@@ -1195,18 +1235,19 @@ function app = BlockAnalysisApp
             'FontWeight','bold', 'FontColor', CLR.text2, 'FontSize', 13);
         lLbl.Layout.Row = 2; lLbl.Layout.Column = 1;
         H.refField = uieditfield(ug, 'text', ...
-            'Placeholder','No image selected yet — use Upload below');
+            'Placeholder','No image selected — use Upload or paste a full path here');
         H.refField.Layout.Row = 2; H.refField.Layout.Column = 2;
-        H.refField.Editable = 'off';
+        H.refField.Editable = 'on';
+        H.refField.ValueChangedFcn = @(d,~) loadTypedRefImage(d.Value);
 
         btnUpload = uibutton(ug, 'Text','Upload image...', 'FontSize', 13);
         btnUpload.Layout.Row = 2; btnUpload.Layout.Column = 3;
         btnUpload.ButtonPushedFcn = @(~,~) uploadRefImage();
 
         uHint = uilabel(ug, 'WordWrap','on', 'FontSize', 12, 'FontColor', CLR.text3, ...
-            'Text', ['Tip: this is usually the first frame of your DIC series ' ...
-            '(before the spring/gel deforms). The same image set will be used ' ...
-            'for tracking in step 4.']);
+            'Text', ['Either click Upload to browse, or paste a full file path ' ...
+            '(e.g. C:\Users\you\Pictures\0001.jpg) and press Enter. This is usually ' ...
+            'the first frame of your DIC series (before the spring/gel deforms).']);
         uHint.Layout.Row = 3; uHint.Layout.Column = [1 3];
 
         % ---- Action card ----
@@ -1253,29 +1294,42 @@ function app = BlockAnalysisApp
             [file, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff', ...
                 'Image files'}, 'Select the reference image');
             if isequal(file, 0), return; end
-            fullPath = fullfile(path, file);
-            S = fig.UserData;
-            S.refImagePath = fullPath;
-            % Also remember the folder for step 4
-            S.imgDir = path;
-            fig.UserData = S;
-            handles.step3.refField.Value = fullPath;
-            % Show preview
-            try
-                I = imread(fullPath);
-                if size(I,3) > 1, Idisp = I; else, Idisp = I; end
-                imshow(Idisp, 'Parent', handles.step3.previewAxes);
-                handles.step3.previewAxes.Title.String = ...
-                    sprintf('Preview: %s', file);
-            catch
-                % preview failure is non-fatal
-            end
-            handles.step3.statusLbl.Text = sprintf( ...
-                'Reference image loaded. Click "Draw 4 regions" to continue.');
-            handles.step3.statusLbl.FontColor = CLR.text2;
+            setRefImage(fullfile(path, file));
         catch ME
             uialert(fig, sprintf('Upload failed: %s', ME.message), 'Error');
         end
+    end
+
+    function loadTypedRefImage(p)
+        if isempty(p), return; end
+        if ~isfile(p)
+            uialert(fig, sprintf(['The path you entered doesn''t point to an ' ...
+                'existing file:\n\n%s\n\nDouble-check the path and try again.'], ...
+                p), 'File not found');
+            return;
+        end
+        setRefImage(p);
+    end
+
+    function setRefImage(fullPath)
+        S = fig.UserData;
+        S.refImagePath = fullPath;
+        [folder, name, ext] = fileparts(fullPath);
+        S.imgDir = [folder filesep];
+        fig.UserData = S;
+        handles.step3.refField.Value = fullPath;
+        % Show preview
+        try
+            I = imread(fullPath);
+            imshow(I, 'Parent', handles.step3.previewAxes);
+            handles.step3.previewAxes.Title.String = ...
+                sprintf('Preview: %s%s', name, ext);
+        catch
+            % preview failure is non-fatal
+        end
+        handles.step3.statusLbl.Text = ...
+            'Reference image loaded. Click "Draw 4 regions" to continue.';
+        handles.step3.statusLbl.FontColor = CLR.text2;
     end
 
     function runROISelection()
@@ -1378,29 +1432,31 @@ function app = BlockAnalysisApp
             'FontSize', 14, 'FontWeight','bold', 'FontColor', CLR.text);
         uTitle.Layout.Row = 1; uTitle.Layout.Column = [1 3];
 
-        lDir = uilabel(ug, 'Text','Status', 'FontWeight','bold', ...
+        lDir = uilabel(ug, 'Text','Folder path', 'FontWeight','bold', ...
             'FontColor', CLR.text2, 'FontSize', 13);
         lDir.Layout.Row = 2; lDir.Layout.Column = 1;
         H.dicDirField = uieditfield(ug, 'text', ...
-            'Placeholder','No images uploaded yet');
+            'Placeholder','Paste a folder path with numbered jpgs, or use Upload below');
         H.dicDirField.Layout.Row = 2; H.dicDirField.Layout.Column = [2 3];
-        H.dicDirField.Editable = 'off';
+        H.dicDirField.Editable = 'on';
+        H.dicDirField.ValueChangedFcn = @(d,~) loadTypedDICFolder(d.Value);
 
         btnUploadDIC = uibutton(ug, 'Text','Upload images from your computer...', ...
             'FontSize', 13, 'BackgroundColor', CLR.accent, 'FontColor', [1 1 1]);
         btnUploadDIC.Layout.Row = 3; btnUploadDIC.Layout.Column = [1 3];
         btnUploadDIC.ButtonPushedFcn = @(~,~) uploadDICSeries();
 
-        btnPickFolder = uibutton(ug, 'Text','...or choose a folder already on your MATLAB Drive', ...
+        btnPickFolder = uibutton(ug, 'Text','...or browse for a folder', ...
             'FontSize', 12);
         btnPickFolder.Layout.Row = 4; btnPickFolder.Layout.Column = [1 3];
         btnPickFolder.ButtonPushedFcn = @(~,~) chooseDICFolder();
 
         uHint = uilabel(ug, 'WordWrap','on', 'FontSize', 12, 'FontColor', CLR.text3, ...
-            'Text', ['Click "Upload images from your computer" to multi-select all ' ...
-            '"after" frames from any folder on your computer (Downloads, Desktop, ' ...
-            'etc.). They will be uploaded into the app in sequence. The reference.jpg ' ...
-            'from step 3 can be in the set — it is skipped automatically.']);
+            'Text', ['Three ways to provide your "after" series: (1) click Upload to ' ...
+            'multi-select images from anywhere on your computer, (2) click Browse to ' ...
+            'pick a folder that already contains numbered jpgs, or (3) paste a folder ' ...
+            'path directly into the field above. The reference image from step 3 can ' ...
+            'be in the set — it is skipped automatically.']);
         uHint.Layout.Row = 5; uHint.Layout.Column = [1 3];
 
         % ---- Action card ----
@@ -1433,7 +1489,7 @@ function app = BlockAnalysisApp
         pg = uigridlayout(plotCard, [1,1]);
         pg.Padding = [16 16 16 16];
         H.axes = uiaxes(pg);
-        H.axes.XLabel.String = 'Image index';
+        H.axes.XLabel.String = 'Load step (image number in series)';
         H.axes.YLabel.String = 'Distance [px]';
         H.axes.Title.String  = 'DIC-measured distances over the load series';
         H.axes.FontSize = 11;
@@ -1453,16 +1509,38 @@ function app = BlockAnalysisApp
         try
             p = uigetdir(pwd, 'Select the folder containing your "after" image series');
             if isequal(p, 0), return; end
-            S = fig.UserData;
-            S.dicDir = p;
-            fig.UserData = S;
-            handles.step4.dicDirField.Value = p;
-            n = numel(dir(fullfile(p, '*.jpg')));
-            handles.step4.statusLbl.Text = sprintf('Folder selected (%d jpg files): %s', n, p);
-            handles.step4.statusLbl.FontColor = CLR.text2;
+            setDICFolder(p);
         catch ME
             uialert(fig, ['Folder picker is unavailable in this environment. ' ...
-                'Use "upload all images" instead. (' ME.message ')'], 'Info');
+                'Use Upload or paste a folder path instead. (' ME.message ')'], 'Info');
+        end
+    end
+
+    function loadTypedDICFolder(p)
+        if isempty(p), return; end
+        if ~isfolder(p)
+            uialert(fig, sprintf(['The path you entered doesn''t point to an ' ...
+                'existing folder:\n\n%s\n\nDouble-check the path and try again.'], ...
+                p), 'Folder not found');
+            return;
+        end
+        setDICFolder(p);
+    end
+
+    function setDICFolder(p)
+        S = fig.UserData;
+        S.dicDir = p;
+        fig.UserData = S;
+        handles.step4.dicDirField.Value = p;
+        n = numel(dir(fullfile(p, '*.jpg')));
+        if n < 2
+            handles.step4.statusLbl.Text = sprintf( ...
+                'Warning: folder has only %d jpg(s). DIC needs at least 2.', n);
+            handles.step4.statusLbl.FontColor = CLR.warn;
+        else
+            handles.step4.statusLbl.Text = sprintf( ...
+                'Folder selected (%d jpg files): %s', n, p);
+            handles.step4.statusLbl.FontColor = CLR.text2;
         end
     end
 
@@ -1486,16 +1564,27 @@ function app = BlockAnalysisApp
             % Copy the chosen files into a fresh temp folder named with
             % sequential 000N.jpg names so DIC_distance_calculation (which
             % reads a numbered folder) works regardless of original names.
+            % The underlying DIC routine does jpgCount = numel(jpgFiles) - 1
+            % (subtracts one to treat the first jpg as a reference), so to
+            % make sure ALL of the user's selected frames get processed we
+            % duplicate the last frame at index N+1. The loop then walks
+            % indices 1..N, hitting every original frame.
             tmpDir = fullfile(tempdir, sprintf('dic_series_%s', ...
                 datestr(now,'yyyymmdd_HHMMSS')));
             if ~exist(tmpDir, 'dir'), mkdir(tmpDir); end
             % Sort filenames so the sequence is preserved
             files = sort(files);
-            for k = 1:numel(files)
+            N = numel(files);
+            for k = 1:N
                 src = fullfile(path, files{k});
                 dst = fullfile(tmpDir, sprintf('%04d.jpg', k));
                 copyfile(src, dst);
             end
+            % Duplicate the last frame as the (N+1)th file so DIC's
+            % off-by-one trim doesn't drop the user's actual last frame.
+            srcLast = fullfile(path, files{end});
+            dstExtra = fullfile(tmpDir, sprintf('%04d.jpg', N + 1));
+            copyfile(srcLast, dstExtra);
 
             S = fig.UserData;
             S.dicDir = [tmpDir filesep];
