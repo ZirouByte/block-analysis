@@ -1,4 +1,4 @@
-function out = load_px2dist_data_app(imgDir, parentFig)
+function out = load_px2dist_data_app(imgDir, parentFig, dimsTable)
 % LOAD_PX2DIST_DATA_APP  App-friendly variant of load_px2dist_data.
 %
 %   Same algorithm (4 trials × 8 corner clicks, perpendicular-probe edge
@@ -7,48 +7,65 @@ function out = load_px2dist_data_app(imgDir, parentFig)
 %   figure(). Designed to be called from BlockAnalysisApp.m.
 %
 %   INPUTS:
-%       imgDir   - path to image folder (will look for 0002.jpg by default)
+%       imgDir    - path to image folder (will look for 0002.jpg by default)
 %       parentFig - uifigure handle for modal dialog parenting (optional)
+%       dimsTable - optional 8x4 matrix of mm measurements (rows L1..L8,
+%                   columns are 4 trials). If omitted, lab defaults are used.
 %
 %   OUTPUT:
-%       out.d  : 1x8 cell, each with 4 mm measurements (hardcoded lab data)
+%       out.d  : 1x8 cell, each with 4 mm measurements
 %       out.px : 1x8 cell, each with 4 pixel measurements from clicks
 
     if nargin < 2, parentFig = []; end
+    if nargin < 3, dimsTable = []; end
 
     % ---------------------------------------------------------------------
-    % Find an image to use
+    % Find an image to use. imgDir may be either a folder OR a direct path
+    % to an image file (the app can pass either).
     % ---------------------------------------------------------------------
     imgPath = '';
     if ~isempty(imgDir)
-        candidates = {'0002.jpg', '0010.jpg', 'reference.jpg'};
-        for c = 1:numel(candidates)
-            p = fullfile(imgDir, candidates{c});
-            if isfile(p), imgPath = p; break; end
-        end
-        % If none found, pick the first jpg/png in folder
-        if isempty(imgPath)
-            d = dir(fullfile(imgDir, '*.jpg'));
-            if isempty(d), d = dir(fullfile(imgDir, '*.png')); end
-            if ~isempty(d), imgPath = fullfile(imgDir, d(1).name); end
+        % If imgDir is actually a direct file path to an image, use it as-is.
+        if isfile(imgDir)
+            imgPath = imgDir;
+        elseif isfolder(imgDir)
+            candidates = {'0002.jpg', '0010.jpg', 'reference.jpg'};
+            for c = 1:numel(candidates)
+                p = fullfile(imgDir, candidates{c});
+                if isfile(p), imgPath = p; break; end
+            end
+            % If none found, pick the first jpg/png in folder
+            if isempty(imgPath)
+                d = dir(fullfile(imgDir, '*.jpg'));
+                if isempty(d), d = dir(fullfile(imgDir, '*.png')); end
+                if ~isempty(d), imgPath = fullfile(imgDir, d(1).name); end
+            end
         end
     end
     if isempty(imgPath) || ~isfile(imgPath)
-        error('No image found. Provide a folder containing 0002.jpg or any image.');
+        error(['No image found. Provide a path to an image file or a folder ' ...
+               'containing 0002.jpg.']);
     end
 
     % ---------------------------------------------------------------------
-    % Hard-coded physical mm measurements (per your lab table)
+    % Physical mm measurements: use user-provided table if given, else
+    % fall back to the original hardcoded lab values.
     % ---------------------------------------------------------------------
-    distanceCommon    = cell(1, 8);
-    distanceCommon{1} = [10.91 10.91 10.96 10.87];   % L1 left-top
-    distanceCommon{2} = [23.73 23.96 23.81 23.98];   % L2 left-right
-    distanceCommon{3} = [10.98 10.92 10.94 10.93];   % L3 left-bottom
-    distanceCommon{4} = [23.86 23.88 23.81 23.90];   % L4 left-left
-    distanceCommon{5} = [ 7.28  7.32  7.34  7.41];   % L5 right-top
-    distanceCommon{6} = [24.14 24.07 24.14 24.09];   % L6 right-right
-    distanceCommon{7} = [ 7.37  7.32  7.33  7.22];   % L7 right-bottom
-    distanceCommon{8} = [24.06 24.12 24.12 23.98];   % L8 right-left
+    distanceCommon = cell(1, 8);
+    if ~isempty(dimsTable) && isequal(size(dimsTable), [8 4])
+        for i = 1:8
+            distanceCommon{i} = dimsTable(i, :);
+        end
+    else
+        distanceCommon{1} = [10.91 10.91 10.96 10.87];   % L1 left-top
+        distanceCommon{2} = [23.73 23.96 23.81 23.98];   % L2 left-right
+        distanceCommon{3} = [10.98 10.92 10.94 10.93];   % L3 left-bottom
+        distanceCommon{4} = [23.86 23.88 23.81 23.90];   % L4 left-left
+        distanceCommon{5} = [ 7.28  7.32  7.34  7.41];   % L5 right-top
+        distanceCommon{6} = [24.14 24.07 24.14 24.09];   % L6 right-right
+        distanceCommon{7} = [ 7.37  7.32  7.33  7.22];   % L7 right-bottom
+        distanceCommon{8} = [24.06 24.12 24.12 23.98];   % L8 right-left
+    end
 
     opts.NumTrials      = 4;
     opts.HalfWidth      = 25;
