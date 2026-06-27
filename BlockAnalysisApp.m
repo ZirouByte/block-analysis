@@ -1063,9 +1063,7 @@ function app = BlockAnalysisApp
     function uploadImages()
         try
             [files, path] = uigetfile({'*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff', ...
-                'Image files (*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff)'; ...
-                '*.*', 'All files (*.*)'}, ...
-                'Select calibration image', 'MultiSelect','on');
+                'Image files'}, 'Select calibration image', 'MultiSelect','on');
             if isequal(files, 0), return; end
             if ischar(files), files = {files}; end
             S = fig.UserData;
